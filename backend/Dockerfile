@@ -2,10 +2,10 @@ FROM maven:3.9.6-eclipse-temurin-17
 
 WORKDIR /app
 
-COPY backend ./backend
+COPY . .
 
-WORKDIR /app/backend
+# build inside backend folder
+RUN cd backend && mvn clean package -DskipTests
 
-RUN mvn clean package -DskipTests
-
-CMD ["sh", "-c", "java -jar backend/target/*.jar"]
+# 👇 IMPORTANT: run from correct path
+CMD ["java", "-jar", "/app/backend/target/football-talks-0.0.1-SNAPSHOT.jar"]
