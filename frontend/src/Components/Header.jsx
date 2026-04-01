@@ -29,6 +29,14 @@ const resolveRoute = (value) => {
   return partialMatch ? partialMatch[1] : null;
 };
 
+const buildPlayerSearchRoute = (value) => {
+  const query = value.trim();
+  if (!query) return null;
+
+  const params = new URLSearchParams({ search: query });
+  return `/players?${params.toString()}`;
+};
+
 const Header = () => {
   const navigate = useNavigate();
   const [searchValue, setSearchValue] = useState("");
@@ -37,7 +45,7 @@ const Header = () => {
   const handleSubmit = (event) => {
     event.preventDefault();
 
-    const targetRoute = resolveRoute(searchValue);
+    const targetRoute = resolveRoute(searchValue) || buildPlayerSearchRoute(searchValue);
     if (!targetRoute) return;
 
     navigate(targetRoute);

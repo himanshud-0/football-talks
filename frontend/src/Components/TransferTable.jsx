@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { getTransfers } from "../Services/api";
 
-const transfers = [
+const fallbackTransfers = [
   {
     player: "Cristiano Ronaldo",
     from: "Juventus",
@@ -52,9 +53,67 @@ const transfers = [
   },
 ];
 
+const normalizeTransfers = (data) => {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== "object") return [];
+
+  const candidates = [data.transfers, data.data, data.items, data.results, data.response];
+  const list = candidates.find(Array.isArray);
+  return Array.isArray(list) ? list : [];
+};
+
+const mapTransfer = (transfer) => {
+  if (!transfer || typeof transfer !== "object") {
+    return null;
+  }
+
+  const fromTeam =
+    transfer.from ||
+    transfer.fromTeamName ||
+    transfer.from_team_name ||
+    transfer.fromTeam?.name ||
+    "Free Agent";
+
+  const toTeam =
+    transfer.to ||
+    transfer.toTeamName ||
+    transfer.to_team_name ||
+    transfer.toTeam?.name ||
+    "Unknown";
+
+  return {
+    player:
+      transfer.player ||
+      transfer.playerName ||
+      transfer.player_name ||
+      "Unknown Player",
+    from: fromTeam,
+    to: toTeam,
+    fee:
+      transfer.fee ||
+      transfer.transferFeeFormatted ||
+      transfer.transfer_fee_formatted ||
+      "Undisclosed",
+  };
+};
+
 const TransferTable = ({ showAll = false }) => {
+  const [transfers, setTransfers] = useState(fallbackTransfers);
   const previewCount = 5;
   const visibleTransfers = showAll ? transfers : transfers.slice(0, previewCount);
+
+  useEffect(() => {
+    getTransfers()
+      .then((data) => {
+        const normalized = normalizeTransfers(data).map(mapTransfer).filter(Boolean);
+        if (normalized.length > 0) {
+          setTransfers(normalized);
+        }
+      })
+      .catch(() => {
+        // Keep bundled transfer data when API is unavailable.
+      });
+  }, []);
 
   return (
     <section className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8 pb-10">

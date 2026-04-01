@@ -132,6 +132,20 @@ INSERT INTO post_likes (post_id, user_id) VALUES
 -- ─────────────────────────────────────────────────────────────────────────
 -- FOOTBALL DATA (Based on footy (1).sql)
 -- ─────────────────────────────────────────────────────────────────────────
+INSERT INTO competitions (name, country, logo_url) VALUES
+('Bundesliga', 'Germany', 'https://ui-avatars.com/api/?name=Bundesliga&background=111827&color=ffffff&bold=true'),
+('Brasileirao', 'Brazil', 'https://ui-avatars.com/api/?name=Brasileirao&background=111827&color=ffffff&bold=true'),
+('EPL', 'England', 'https://ui-avatars.com/api/?name=Premier+League&background=111827&color=ffffff&bold=true'),
+('Eredivisie', 'Netherlands', 'https://ui-avatars.com/api/?name=Eredivisie&background=111827&color=ffffff&bold=true'),
+('Ekstraklasa', 'Poland', 'https://ui-avatars.com/api/?name=Ekstraklasa&background=111827&color=ffffff&bold=true'),
+('LaLiga', 'Spain', 'https://ui-avatars.com/api/?name=LaLiga&background=111827&color=ffffff&bold=true'),
+('Liga Portugal', 'Portugal', 'https://ui-avatars.com/api/?name=Liga+Portugal&background=111827&color=ffffff&bold=true'),
+('Ligue 1', 'France', 'https://ui-avatars.com/api/?name=Ligue+1&background=111827&color=ffffff&bold=true'),
+('MLS', 'USA', 'https://ui-avatars.com/api/?name=MLS&background=111827&color=ffffff&bold=true'),
+('Saudi Pro League', 'Saudi Arabia', 'https://ui-avatars.com/api/?name=Saudi+Pro+League&background=111827&color=ffffff&bold=true'),
+('Serie A', 'Italy', 'https://ui-avatars.com/api/?name=Serie+A&background=111827&color=ffffff&bold=true'),
+('Super Lig', 'Turkey', 'https://ui-avatars.com/api/?name=Super+Lig&background=111827&color=ffffff&bold=true');
+
 INSERT INTO teams (name, country, league) VALUES
 ('AC Milan', 'Italy', 'Serie A'),
 ('Ajax', 'Netherlands', 'Eredivisie'),
@@ -168,6 +182,20 @@ INSERT INTO teams (name, country, league) VALUES
 ('Sevilla', 'Spain', 'LaLiga'),
 ('Sporting CP', 'Portugal', 'Liga Portugal'),
 ('Tottenham Hotspur', 'England', 'EPL');
+
+UPDATE teams t
+SET
+    competition_id = (
+        SELECT c.competition_id
+        FROM competitions c
+        WHERE c.name = t.league
+        LIMIT 1
+    ),
+    logo_url = CONCAT(
+        'https://ui-avatars.com/api/?name=',
+        REPLACE(t.name, ' ', '+'),
+        '&background=0f172a&color=ffffff&bold=true'
+    );
 
 INSERT INTO players (name, age, nationality, position, team_id, market_value) VALUES
 ('Jude Bellingham', 22, 'England', 'Midfielder', (SELECT team_id FROM teams WHERE name='Real Madrid'), 120000000),
@@ -271,6 +299,42 @@ UPDATE players SET appearances = 36, goals_scored = 22, assists = 11, special_ab
 UPDATE players SET appearances = 34, goals_scored = 11, assists = 12, special_ability = 'Box-to-Box Control', minutes_played = 2930, yellow_cards = 6, red_cards = 0, rating = 8.3 WHERE name = 'Jude Bellingham';
 UPDATE players SET appearances = 37, goals_scored = 0, assists = 2, special_ability = 'Reflex Shot Stopping', minutes_played = 3330, yellow_cards = 1, red_cards = 0, rating = 8.2 WHERE name = 'Alisson Becker';
 UPDATE players SET appearances = 36, goals_scored = 0, assists = 2, special_ability = 'Distribution Passing', minutes_played = 3240, yellow_cards = 2, red_cards = 0, rating = 8.1 WHERE name = 'Ederson';
+
+UPDATE players p
+SET
+    firstname = SUBSTRING_INDEX(p.name, ' ', 1),
+    lastname = CASE
+        WHEN LOCATE(' ', p.name) > 0 THEN TRIM(SUBSTRING(p.name, LOCATE(' ', p.name) + 1))
+        ELSE ''
+    END,
+    photo_url = CONCAT(
+        'https://ui-avatars.com/api/?name=',
+        REPLACE(p.name, ' ', '+'),
+        '&background=1f2937&color=ffffff&bold=true'
+    ),
+    description = CONCAT(
+        p.name,
+        ' is a featured ',
+        LOWER(p.position),
+        ' playing for ',
+        COALESCE((SELECT t.name FROM teams t WHERE t.team_id = p.team_id), 'club football'),
+        '.'
+    );
+
+INSERT INTO player_stats (player_id, team_id, competition_id, season, appearances, goals, assists, minutes, rating)
+SELECT
+    p.player_id,
+    p.team_id,
+    t.competition_id,
+    '2025/26',
+    p.appearances,
+    p.goals_scored,
+    p.assists,
+    p.minutes_played,
+    p.rating
+FROM players p
+LEFT JOIN teams t ON t.team_id = p.team_id
+WHERE p.team_id IS NOT NULL;
 
 INSERT INTO transfers (player_id, from_team_id, to_team_id, transfer_fee, transfer_date, season) VALUES
 ((SELECT player_id FROM players WHERE name='Kylian Mbappe'), (SELECT team_id FROM teams WHERE name='PSG'), (SELECT team_id FROM teams WHERE name='Real Madrid'), 180000000, '2025-07-01', '2025/26'),

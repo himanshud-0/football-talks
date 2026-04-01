@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
-import { getPlayers } from "../Services/Api";
+import { useSearchParams } from "react-router-dom";
+import { getPlayers } from "../Services/api";
 import Header from "../Components/Header";
 import Footer from "../Components/Footer";
 import TrendPlayers from "../Components/TrendPlayers";
 import { playerSchemas } from "../data/playerSchemas";
+
+const normalizeName = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+const curatedPlayersByName = new Map(
+  playerSchemas.map((player) => [normalizeName(player.name), player])
+);
 
 const normalizePlayers = (data) => {
   if (Array.isArray(data)) return data;
@@ -14,15 +25,51 @@ const normalizePlayers = (data) => {
   return Array.isArray(list) ? list : [];
 };
 
+const enrichPlayers = (players) => {
+  const seen = new Set();
+
+  return players
+    .map((player) => {
+      if (!player || typeof player !== "object") return player;
+
+      const curated = curatedPlayersByName.get(normalizeName(player.name));
+      return curated ? { ...player, ...curated } : player;
+    })
+    .filter((player) => {
+      const key = normalizeName(player?.name);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => {
+      const leftCuratedIndex = playerSchemas.findIndex(
+        (player) => normalizeName(player.name) === normalizeName(left?.name)
+      );
+      const rightCuratedIndex = playerSchemas.findIndex(
+        (player) => normalizeName(player.name) === normalizeName(right?.name)
+      );
+
+      if (leftCuratedIndex !== -1 && rightCuratedIndex !== -1) {
+        return leftCuratedIndex - rightCuratedIndex;
+      }
+      if (leftCuratedIndex !== -1) return -1;
+      if (rightCuratedIndex !== -1) return 1;
+
+      return String(left?.name || "").localeCompare(String(right?.name || ""));
+    });
+};
+
 function Players() {
+  const [searchParams] = useSearchParams();
   const [players, setPlayers] = useState(playerSchemas);
+  const searchTerm = searchParams.get("search")?.trim() || "";
 
   useEffect(() => {
     getPlayers()
       .then((data) => {
         const normalized = normalizePlayers(data);
         if (normalized.length > 0) {
-          setPlayers(normalized);
+          setPlayers(enrichPlayers(normalized));
         }
       })
       .catch(() => {
@@ -114,6 +161,26 @@ function Players() {
     return player.specialAbility || player.special_ability || "";
   };
 
+  const matchesSearch = (player) => {
+    if (!searchTerm) return true;
+
+    const searchableText = [
+      getPlayerName(player, 0),
+      getPlayerRole(player),
+      getPlayerDescription(player),
+      getPlayerClub(player),
+      getPlayerNationality(player),
+      player?.specialAbility,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return searchableText.includes(searchTerm.toLowerCase());
+  };
+
+  const filteredPlayers = players.filter(matchesSearch);
+
   return (
     <div className="players-page-bg min-h-screen flex flex-col">
       <Header />
@@ -122,10 +189,17 @@ function Players() {
           Top Players
         </h1>
         <p className="players-subtitle text-[#B3B3B3] mb-8">
-          Discover featured football players with live data.
+          {searchTerm
+            ? `Showing ${filteredPlayers.length} result${filteredPlayers.length === 1 ? "" : "s"} for "${searchTerm}".`
+            : `Discover featured football players with live data. ${players.length} profiles loaded.`}
         </p>
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 justify-items-center">
-          {players.map((player, index) => (
+        {filteredPlayers.length === 0 ? (
+          <div className="rounded-2xl border border-[#1A1A1A] bg-[#121821] px-6 py-10 text-center text-[#B3B3B3]">
+            No players matched "{searchTerm}". Try a player name, club, nationality, or position.
+          </div>
+        ) : (
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 justify-items-center">
+            {filteredPlayers.map((player, index) => (
             <TrendPlayers
               key={`${getPlayerName(player, index)}-${index}`}
               title={getPlayerName(player, index)}
@@ -143,8 +217,9 @@ function Players() {
               specialAbility={getPlayerSpecialAbility(player)}
               delay={`${index * 100}ms`}
             />
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </main>
       <Footer />
     </div>

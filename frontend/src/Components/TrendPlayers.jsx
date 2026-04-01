@@ -19,6 +19,14 @@ const TrendPlayers = ({
   seeMoreTo = "/players",
 }) => {
   const resolvedImagePosition = imagePosition || "center 14%";
+  const playerName = title || news || "Player";
+  const resolvedSrc =
+    typeof src === "string" && src.includes("/portrait/header/")
+      ? src.replace("/portrait/header/", "/portrait/big/")
+      : src;
+  const fallbackSrc = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+    playerName
+  )}&background=111827&color=ffffff&bold=true&size=512`;
   const hasStats =
     appearances !== undefined ||
     goalsScored !== undefined ||
@@ -32,7 +40,7 @@ const TrendPlayers = ({
       style={{ animationDelay: delay }}
     >
       <img
-        src={src?.includes("/portrait/header/") ? src.replace("/portrait/header/", "/portrait/big/") : src}
+        src={resolvedSrc || fallbackSrc}
         alt={title}
         className="absolute inset-0 w-full h-full object-cover"
         style={{ objectPosition: resolvedImagePosition, filter: "brightness(0.62)" }}
@@ -40,7 +48,7 @@ const TrendPlayers = ({
           const target = event.currentTarget;
           if (target.dataset.fallbackApplied === "true") return;
           target.dataset.fallbackApplied = "true";
-          target.src = src;
+          target.src = fallbackSrc;
         }}
       />
       <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A]/78 via-[#0A0A0A]/28 to-transparent" />
