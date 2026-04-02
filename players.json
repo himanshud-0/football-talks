@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Lionel Messi",
+    "firstname": "Lionel",
+    "lastname": "Messi",
+    "age": 37,
+    "nationality": "Argentina",
+    "position": "Forward",
+    "club": "Inter Miami",
+    "league": "MLS",
+    "appearances": 30,
+    "goalsScored": 25,
+    "assists": 12,
+    "rating": 8.8
+  },
+  {
+    "name": "Cristiano Ronaldo",
+    "firstname": "Cristiano",
+    "lastname": "Ronaldo",
+    "age": 39,
+    "nationality": "Portugal",
+    "position": "Forward",
+    "club": "Al Nassr",
+    "league": "Saudi League",
+    "appearances": 28,
+    "goalsScored": 27,
+    "assists": 8,
+    "rating": 8.5
+  }
+]
