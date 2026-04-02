@@ -1,7 +1,6 @@
 package com.footballtalks.footballtalks.scheduler;
 
 import com.footballtalks.footballtalks.dto.PlayerResponse;
-import com.footballtalks.footballtalks.service.ApiFootballPersistenceService;
 import com.footballtalks.footballtalks.service.ApiFootballPlayerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,9 +8,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 public class PlayerSyncScheduler {
@@ -34,32 +35,44 @@ public class PlayerSyncScheduler {
 
     private final ApiFootballPlayerService apiFootballPlayerService;
     private final int season;
-
-    // Tracks which league index to sync next (cycles through the list)
-    private final AtomicInteger currentLeagueIndex = new AtomicInteger(0);
+    private final LocalDate syncStartDate;
+    private final Clock clock;
 
     public PlayerSyncScheduler(ApiFootballPlayerService apiFootballPlayerService,
-                               @Value("${api.football.default-season:2024}") int season) {
+                               @Value("${api.football.default-season:2024}") int season,
+                               @Value("${api.football.sync-start-date:2024-01-01}") String syncStartDate) {
+        this(apiFootballPlayerService, season, LocalDate.parse(syncStartDate), Clock.systemUTC());
+    }
+
+    PlayerSyncScheduler(ApiFootballPlayerService apiFootballPlayerService,
+                        int season,
+                        LocalDate syncStartDate,
+                        Clock clock) {
         this.apiFootballPlayerService = apiFootballPlayerService;
         this.season = season;
+        this.syncStartDate = syncStartDate;
+        this.clock = clock;
     }
 
     /**
      * Runs once every day at 3:00 AM UTC.
      * Syncs ONE league per day to stay within the free API limit (100 requests/day).
-     * Cycles through all leagues in LEAGUES_TO_SYNC over multiple days.
+     * Cycles through all leagues in LEAGUES_TO_SYNC over multiple days using the UTC date,
+     * so the schedule stays consistent across application restarts.
      */
-    @Scheduled(cron = "0 0 3 * * *")
+    @Scheduled(cron = "0 0 3 * * *", zone = "UTC")
     public void syncNextLeague() {
         if (!apiFootballPlayerService.isConfigured()) {
             log.warn("API-Football key not configured — skipping player sync");
             return;
         }
 
-        int index = currentLeagueIndex.getAndUpdate(i -> (i + 1) % LEAGUES_TO_SYNC.size());
+        LocalDate todayUtc = LocalDate.now(clock);
+        int index = resolveLeagueIndex(todayUtc);
         int leagueId = LEAGUES_TO_SYNC.get(index);
 
-        log.info("Starting daily player sync for league {} (index {}/{})", leagueId, index + 1, LEAGUES_TO_SYNC.size());
+        log.info("Starting daily player sync for league {} on {} UTC (index {}/{})",
+                leagueId, todayUtc, index + 1, LEAGUES_TO_SYNC.size());
 
         try {
             List<PlayerResponse> players = apiFootballPlayerService.getPlayers(
@@ -80,5 +93,10 @@ public class PlayerSyncScheduler {
         } catch (Exception e) {
             log.error("Failed to sync players for league {}: {}", leagueId, e.getMessage(), e);
         }
+    }
+
+    int resolveLeagueIndex(LocalDate syncDateUtc) {
+        long daysSinceStart = ChronoUnit.DAYS.between(syncStartDate, syncDateUtc);
+        return (int) Math.floorMod(daysSinceStart, LEAGUES_TO_SYNC.size());
     }
 }

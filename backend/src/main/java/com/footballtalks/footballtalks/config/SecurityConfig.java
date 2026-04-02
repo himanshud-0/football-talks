@@ -40,9 +40,10 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
-                    "/api/auth/**",
+        "/api/auth/**",
                     "/api/health",
                     "/api/debug/**",
+                    "/api/admin/**",   // 🔥 ADD THIS LINE
                     "/swagger-ui/**",
                     "/swagger-ui.html",
                     "/v3/api-docs/**"
