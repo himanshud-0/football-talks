@@ -455,12 +455,13 @@ public class ApiFootballPlayerService {
                 .reduce((left, right) -> left + "&" + right)
                 .orElse("");
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + path + (query.isEmpty() ? "" : "?" + query)))
-                .header("x-apisports-key", apiKey)
-                .timeout(Duration.ofSeconds(60))
-                .GET()
-                .build();
+       HttpRequest request = HttpRequest.newBuilder()
+        .uri(URI.create(baseUrl + path + (query.isEmpty() ? "" : "?" + query)))
+        .header("x-apisports-key", apiKey)
+        .header("x-apisports-host", "v3.football.api-sports.io") // 🔥 ADD THIS
+        .timeout(Duration.ofSeconds(60))
+        .GET()
+        .build();
 
         HttpResponse<String> response;
         try {
