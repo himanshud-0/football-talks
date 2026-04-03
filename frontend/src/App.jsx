@@ -8,6 +8,8 @@ import SignUpPage from './Pages/SignUpPage.jsx'
 import NewsPage from './Pages/NewsPage.jsx'
 import LeaguesPage from './Pages/LeaguesPage.jsx'
 import ClubDetailPage from './Pages/ClubDetailPage.jsx'
+import StandingsPage from './Pages/StandingsPage.jsx'
+import FixturesPage from './Pages/FixturesPage.jsx'
 import './App.css'
 
 function App() {
@@ -21,6 +23,8 @@ function App() {
         <Route path="/news" element={<NewsPage />} />
         <Route path="/leagues" element={<LeaguesPage />} />
         <Route path="/clubs/:id" element={<ClubDetailPage />} />
+        <Route path="/standings" element={<StandingsPage />} />
+        <Route path="/fixtures" element={<FixturesPage />} />
         <Route path="/transfers" element={<TransferPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignUpPage />} />
