@@ -2,6 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 
 const TrendPlayers = ({
+  id,
   title,
   news,
   description,
@@ -16,7 +17,6 @@ const TrendPlayers = ({
   rating,
   specialAbility,
   delay = "0ms",
-  seeMoreTo = "/players",
 }) => {
   const resolvedImagePosition = imagePosition || "center 14%";
   const playerName = title || news || "Player";
@@ -27,12 +27,16 @@ const TrendPlayers = ({
   const fallbackSrc = `https://ui-avatars.com/api/?name=${encodeURIComponent(
     playerName
   )}&background=111827&color=ffffff&bold=true&size=512`;
+
   const hasStats =
     appearances !== undefined ||
     goalsScored !== undefined ||
     assists !== undefined ||
     rating !== undefined ||
     !!specialAbility;
+
+  // Link to player detail if we have an id, otherwise players list
+  const detailLink = id ? `/players/${id}` : `/players?search=${encodeURIComponent(playerName)}`;
 
   return (
     <div
@@ -62,9 +66,15 @@ const TrendPlayers = ({
               <h2 className="text-base font-semibold leading-tight text-[#FFFFFF]">{news}</h2>
               <p className="mt-1 text-xs leading-tight text-[#D1D5DB]">{description}</p>
               <div className="mt-1.5 flex flex-wrap gap-1 text-[10px]">
-                <span className="px-2 py-0.5 bg-[#1A1A1A]/65 text-[#FFFFFF] rounded">{club}</span>
-                <span className="px-2 py-0.5 bg-[#1A1A1A]/65 text-[#FFFFFF] rounded">Age: {age}</span>
-                <span className="px-2 py-0.5 bg-[#1A1A1A]/65 text-[#FFFFFF] rounded">{nationality}</span>
+                {club && (
+                  <span className="px-2 py-0.5 bg-[#1A1A1A]/65 text-[#FFFFFF] rounded">{club}</span>
+                )}
+                {age && age !== "N/A" && (
+                  <span className="px-2 py-0.5 bg-[#1A1A1A]/65 text-[#FFFFFF] rounded">Age: {age}</span>
+                )}
+                {nationality && nationality !== "Unknown" && (
+                  <span className="px-2 py-0.5 bg-[#1A1A1A]/65 text-[#FFFFFF] rounded">{nationality}</span>
+                )}
               </div>
             </div>
             {hasStats ? (
@@ -73,7 +83,7 @@ const TrendPlayers = ({
                   {title}
                 </h3>
                 <div className="rounded-lg bg-black/55 p-2.5 backdrop-blur-sm border border-white/15 opacity-0 translate-y-3 scale-95 transition-all duration-300 ease-out group-hover:opacity-100 group-hover:translate-y-0 group-hover:scale-100">
-                  <p className="mb-1 text-[10px] uppercase tracking-wide text-[#FFB37D]">All-Time Stats</p>
+                  <p className="mb-1 text-[10px] uppercase tracking-wide text-[#FFB37D]">Stats</p>
                   <div className="grid grid-cols-4 gap-1 text-[10px]">
                     <div className="text-center">
                       <p className="text-[#9CA3AF]">Apps</p>
@@ -102,7 +112,7 @@ const TrendPlayers = ({
             ) : null}
           </div>
           <Link
-            to={seeMoreTo}
+            to={detailLink}
             className="mt-1.5 inline-block text-xs font-semibold text-[#FF6B00] hover:text-[#FF8533]"
           >
             See more
