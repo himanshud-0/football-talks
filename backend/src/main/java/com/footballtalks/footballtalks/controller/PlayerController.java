@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
+@RequestMapping("/api/players")
 public class PlayerController {
 
     private static final Logger log = LoggerFactory.getLogger(PlayerController.class);
@@ -25,12 +26,7 @@ public class PlayerController {
         this.apiFootballPlayerService = apiFootballPlayerService;
     }
 
-    @GetMapping("/api/debug/api-key")
-    public ResponseEntity<String> debug() {
-        return ResponseEntity.ok("API configured: " + apiFootballPlayerService.isConfigured());
-    }
-
-    @GetMapping("/api/players")
+    @GetMapping
     public ResponseEntity<List<PlayerResponse>> getPlayers(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String position,
@@ -67,7 +63,7 @@ public class PlayerController {
                 .body(transferMarketService.getPlayers(search, position, teamId, competitionId, sortBy, direction, limit));
     }
 
-    @GetMapping("/api/players/{id}")
+    @GetMapping("/{id}")
     public ResponseEntity<PlayerDetailResponse> getPlayer(@PathVariable Long id,
                                                           @RequestParam(required = false) Integer league,
                                                           @RequestParam(required = false) Integer season,
