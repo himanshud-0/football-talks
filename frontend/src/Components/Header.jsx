@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 
 const ROUTE_MAP = {
@@ -17,37 +17,57 @@ const ROUTE_MAP = {
 
 const resolveRoute = (value) => {
   const query = value.trim().toLowerCase();
-
   if (!query) return null;
   if (query.startsWith("/")) return query;
   if (ROUTE_MAP[query]) return ROUTE_MAP[query];
-
-  const partialMatch = Object.entries(ROUTE_MAP).find(([key]) =>
-    query.includes(key)
-  );
-
+  const partialMatch = Object.entries(ROUTE_MAP).find(([key]) => query.includes(key));
   return partialMatch ? partialMatch[1] : null;
 };
 
 const buildPlayerSearchRoute = (value) => {
   const query = value.trim();
   if (!query) return null;
-
-  const params = new URLSearchParams({ search: query });
-  return `/players?${params.toString()}`;
+  return `/players?${new URLSearchParams({ search: query }).toString()}`;
 };
 
 const Header = () => {
   const navigate = useNavigate();
   const [searchValue, setSearchValue] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [user, setUser] = useState(null);
+
+  // Read user from localStorage on mount and on storage changes
+  useEffect(() => {
+    const loadUser = () => {
+      try {
+        const stored = localStorage.getItem("user");
+        setUser(stored ? JSON.parse(stored) : null);
+      } catch {
+        setUser(null);
+      }
+    };
+    loadUser();
+    window.addEventListener("storage", loadUser);
+    // Also poll every second to catch same-tab login
+    const interval = setInterval(loadUser, 1000);
+    return () => {
+      window.removeEventListener("storage", loadUser);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setUser(null);
+    setIsMenuOpen(false);
+    navigate("/");
+  };
 
   const handleSubmit = (event) => {
     event.preventDefault();
-
     const targetRoute = resolveRoute(searchValue) || buildPlayerSearchRoute(searchValue);
     if (!targetRoute) return;
-
     navigate(targetRoute);
     setSearchValue("");
     setIsMenuOpen(false);
@@ -119,9 +139,44 @@ const Header = () => {
     },
   ];
 
+  // Auth button — shown in both desktop and mobile
+  const AuthButton = ({ mobile = false }) => {
+    if (user) {
+      return (
+        <div className={`flex items-center gap-2 ${mobile ? "flex-col sm:flex-row" : ""}`}>
+          <span className={`text-[#B3B3B3] font-medium truncate max-w-[120px] ${mobile ? "text-sm" : "text-sm lg:text-base"}`}>
+            👤 {user.username || user.fullName || "User"}
+          </span>
+          <button
+            onClick={handleLogout}
+            className={`whitespace-nowrap bg-transparent border border-[#FF6B00] text-[#FF6B00] hover:bg-[#FF6B00] hover:text-white transition-colors font-medium rounded-xl ${
+              mobile ? "px-4 py-2 text-sm w-full sm:w-auto" : "px-3 lg:px-5 py-2 lg:py-2.5 text-sm lg:text-base"
+            }`}
+          >
+            Logout
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <Link
+        to="/login"
+        onClick={() => setIsMenuOpen(false)}
+        className={`inline-flex justify-center whitespace-nowrap bg-[#FF6B00] text-[#FFFFFF] hover:bg-[#FF8533] cursor-pointer font-medium rounded-xl transition-colors ${
+          mobile ? "px-4 py-2 text-sm w-full sm:w-auto" : "px-3 lg:px-5 py-2 lg:py-2.5 text-sm lg:text-base"
+        }`}
+      >
+        Sign In
+      </Link>
+    );
+  };
+
   return (
     <nav className="bg-gradient-to-r from-[#0F0F0F] to-[#121212] text-[#FFFFFF] shadow-md sticky top-0 z-50 border-b border-[#1A1A1A]">
       <div className="w-full px-3 sm:px-4 lg:px-6 py-3">
+
+        {/* Mobile top bar */}
         <div className="flex items-center justify-between gap-3 lg:hidden">
           <Link to="/" className="flex items-center gap-2">
             <span className="h-9 w-9 rounded-xl bg-[#FF6B00] text-[#FFFFFF] text-xl font-bold grid place-items-center">
@@ -142,6 +197,7 @@ const Header = () => {
           </button>
         </div>
 
+        {/* Desktop nav */}
         <div className="hidden lg:grid lg:grid-cols-[auto_1fr_auto] lg:items-center lg:gap-3 xl:gap-6">
           <Link to="/" className="flex items-center gap-2 justify-self-start">
             <span className="h-8 w-8 lg:h-10 lg:w-10 rounded-xl bg-[#FF6B00] text-[#FFFFFF] text-lg lg:text-2xl font-bold grid place-items-center">
@@ -151,6 +207,7 @@ const Header = () => {
               Football<span className="text-[#FF6B00]">Insider</span>
             </span>
           </Link>
+
           <ul className="flex items-center justify-center gap-1 lg:gap-4 font-medium text-sm lg:text-lg xl:text-xl">
             {navItems.map((item) => (
               <li key={item.to}>
@@ -161,11 +218,10 @@ const Header = () => {
               </li>
             ))}
           </ul>
+
           <div className="flex items-center gap-2 lg:gap-3 justify-self-end">
-            <form onSubmit={handleSubmit} className="w-full sm:w-auto">
-              <label htmlFor="header-search-desktop" className="sr-only">
-                Search pages
-              </label>
+            <form onSubmit={handleSubmit}>
+              <label htmlFor="header-search-desktop" className="sr-only">Search pages</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B3B3B3]">
                   <svg viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current" strokeWidth="2">
@@ -177,26 +233,18 @@ const Header = () => {
                   id="header-search-desktop"
                   type="text"
                   value={searchValue}
-                  onChange={(event) => setSearchValue(event.target.value)}
+                  onChange={(e) => setSearchValue(e.target.value)}
                   placeholder="Search players, clubs..."
                   className="w-[180px] lg:w-[250px] xl:w-[330px] border border-[#1A1A1A] rounded-xl pl-10 pr-4 py-2 lg:py-2.5 focus:outline-none focus:border-[#FF6B00] bg-[#121821] text-[#FFFFFF] placeholder:text-[#B3B3B3]"
                 />
               </div>
             </form>
-            <Link
-              to="/login"
-              className="inline-flex justify-center whitespace-nowrap bg-[#FF6B00] text-[#FFFFFF] px-3 lg:px-5 py-2 lg:py-2.5 rounded-xl hover:bg-[#FF8533] cursor-pointer font-medium text-sm lg:text-base"
-            >
-              Sign In
-            </Link>
+            <AuthButton />
           </div>
         </div>
 
-        <div
-          className={`${
-            isMenuOpen ? "flex" : "hidden"
-          } lg:hidden flex-col gap-4 pt-4`}
-        >
+        {/* Mobile menu */}
+        <div className={`${isMenuOpen ? "flex" : "hidden"} lg:hidden flex-col gap-4 pt-4`}>
           <ul className="flex flex-col gap-3 font-medium text-left">
             {navItems.map((item) => (
               <li key={item.to}>
@@ -209,27 +257,20 @@ const Header = () => {
           </ul>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <form onSubmit={handleSubmit} className="w-full sm:w-auto">
-              <label htmlFor="header-search-mobile" className="sr-only">
-                Search pages
-              </label>
+              <label htmlFor="header-search-mobile" className="sr-only">Search pages</label>
               <input
                 id="header-search-mobile"
                 type="text"
                 value={searchValue}
-                onChange={(event) => setSearchValue(event.target.value)}
+                onChange={(e) => setSearchValue(e.target.value)}
                 placeholder="Search players, clubs..."
                 className="w-full sm:w-72 border border-[#1A1A1A] rounded-lg px-3 py-2 focus:outline-none focus:border-[#FF6B00] bg-[#121821] text-[#FFFFFF] placeholder:text-[#B3B3B3]"
               />
             </form>
-            <Link
-              to="/login"
-              onClick={() => setIsMenuOpen(false)}
-              className="inline-flex justify-center whitespace-nowrap bg-[#FF6B00] text-[#FFFFFF] px-4 py-2 rounded-lg hover:bg-[#FF8533] cursor-pointer"
-            >
-              Sign In
-            </Link>
+            <AuthButton mobile />
           </div>
         </div>
+
       </div>
     </nav>
   );

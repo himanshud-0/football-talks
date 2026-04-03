@@ -24,4 +24,14 @@ public class TeamController {
             @RequestParam(required = false) Integer limit) {
         return ResponseEntity.ok(transferMarketService.getTeams(search, competitionId, limit));
     }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<TeamResponse> getTeam(@PathVariable Long id) {
+        return transferMarketService.getTeams(null, null, null)
+                .stream()
+                .filter(t -> t.getId() != null && t.getId().equals(id))
+                .findFirst()
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
 }
