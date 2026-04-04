@@ -1,276 +1,269 @@
 package com.footballtalks.footballtalks.scheduler;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.footballtalks.footballtalks.dto.CompetitionSummaryResponse;
 import com.footballtalks.footballtalks.dto.PlayerResponse;
 import com.footballtalks.footballtalks.dto.TeamSummaryResponse;
 import com.footballtalks.footballtalks.service.ApiFootballPersistenceService;
-import com.footballtalks.footballtalks.service.ApiFootballPlayerService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.LocalDate;
-import java.time.Period;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Syncs one league per day using api-football.com.
+ * Fetches full player data: photos, stats, market values.
+ * Cycles through all configured leagues automatically.
+ */
 @Component
 public class PlayerSyncScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(PlayerSyncScheduler.class);
 
-    private static final List<String> LEAGUES_TO_SYNC = Arrays.asList(
-            "PL",   // Premier League
-            "PD",   // La Liga
-            "SA",   // Serie A
-            "BL1",  // Bundesliga
-            "FL1",  // Ligue 1
-            "CL",   // Champions League
-            "DED",  // Eredivisie
-            "PPL",  // Primeira Liga
-            "BSA",  // Brasileirao
-            "ELC"   // Championship
+    // All major leagues with api-football.com IDs
+    // Add more IDs here to sync more leagues
+    private static final List<Integer> ALL_LEAGUES = List.of(
+            39,   // Premier League (England)
+            140,  // La Liga (Spain)
+            135,  // Serie A (Italy)
+            78,   // Bundesliga (Germany)
+            61,   // Ligue 1 (France)
+            307,  // Saudi Pro League
+            2,    // Champions League
+            3,    // Europa League
+            88,   // Eredivisie (Netherlands)
+            94,   // Primeira Liga (Portugal)
+            203,  // Super Lig (Turkey)
+            253,  // MLS (USA)
+            71,   // Brasileirao (Brazil)
+            283   // Indian Super League
     );
 
-    private static final Map<String, Long> LEAGUE_IDS = new HashMap<>() {{
-        put("PL", 2021L);
-        put("PD", 2014L);
-        put("SA", 2019L);
-        put("BL1", 2002L);
-        put("FL1", 2015L);
-        put("CL", 2001L);
-        put("DED", 2003L);
-        put("PPL", 2017L);
-        put("BSA", 2013L);
-        put("ELC", 2016L);
-    }};
-
-    private static final Map<String, String> LEAGUE_COUNTRIES = new HashMap<>() {{
-        put("PL", "England");
-        put("PD", "Spain");
-        put("SA", "Italy");
-        put("BL1", "Germany");
-        put("FL1", "France");
-        put("CL", "Europe");
-        put("DED", "Netherlands");
-        put("PPL", "Portugal");
-        put("BSA", "Brazil");
-        put("ELC", "England");
-    }};
-
-    private static final Map<String, String> LEAGUE_NAMES = new HashMap<>() {{
-        put("PL", "Premier League");
-        put("PD", "La Liga");
-        put("SA", "Serie A");
-        put("BL1", "Bundesliga");
-        put("FL1", "Ligue 1");
-        put("CL", "UEFA Champions League");
-        put("DED", "Eredivisie");
-        put("PPL", "Primeira Liga");
-        put("BSA", "Brasileirao");
-        put("ELC", "Championship");
-    }};
-
-    private final ApiFootballPlayerService apiFootballPlayerService;
     private final ApiFootballPersistenceService persistenceService;
     private final ObjectMapper objectMapper;
-    private final String footballDataApiKey;
+    private final String apiKey;
+    private final String baseUrl;
+    private final int defaultSeason;
     private final HttpClient httpClient;
+
+    // Tracks which league to sync next
     private int currentIndex = 0;
 
-    public PlayerSyncScheduler(ApiFootballPlayerService apiFootballPlayerService,
-                                ApiFootballPersistenceService persistenceService,
-                                ObjectMapper objectMapper,
-                                @Value("${football.data.api.key:}") String footballDataApiKey) {
-        this.apiFootballPlayerService = apiFootballPlayerService;
+    public PlayerSyncScheduler(ApiFootballPersistenceService persistenceService,
+                               ObjectMapper objectMapper,
+                               @Value("${api.football.key:}") String apiKey,
+                               @Value("${api.football.base-url:https://v3.football.api-sports.io}") String baseUrl,
+                               @Value("${api.football.default-season:2024}") int defaultSeason) {
         this.persistenceService = persistenceService;
         this.objectMapper = objectMapper;
-        this.footballDataApiKey = footballDataApiKey;
+        this.apiKey = apiKey;
+        this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        this.defaultSeason = defaultSeason;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
     }
 
+    /**
+     * Runs every day at 3 AM UTC — syncs one league per run.
+     * With 14 leagues, full sync completes in 14 days.
+     */
     @Scheduled(cron = "0 0 3 * * *", zone = "UTC")
     public void syncNextLeague() {
-        if (footballDataApiKey == null || footballDataApiKey.isBlank()) {
-            log.warn("FOOTBALL_DATA_API_KEY not configured — skipping sync");
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("API_FOOTBALL_KEY not configured — skipping sync");
             return;
         }
 
-        String leagueCode = LEAGUES_TO_SYNC.get(currentIndex);
-        currentIndex = (currentIndex + 1) % LEAGUES_TO_SYNC.size();
+        int leagueId = ALL_LEAGUES.get(currentIndex);
+        currentIndex = (currentIndex + 1) % ALL_LEAGUES.size();
 
-        log.info("Starting daily sync for league {}", leagueCode);
-
+        log.info("Starting daily sync for league {} (season {})", leagueId, defaultSeason);
         try {
-            int totalFetched = fetchAndPersistLeague(leagueCode);
-            log.info("Synced {} players for league {}", totalFetched, leagueCode);
+            int total = syncLeague(leagueId, defaultSeason);
+            log.info("Synced {} players for league {}", total, leagueId);
         } catch (Exception e) {
-            log.error("Failed to sync league {}: {}", leagueCode, e.getMessage(), e);
+            log.error("Failed to sync league {}: {}", leagueId, e.getMessage(), e);
         }
     }
 
-    private int fetchAndPersistLeague(String leagueCode) throws Exception {
-        Long competitionId = LEAGUE_IDS.get(leagueCode);
-        String leagueName = LEAGUE_NAMES.get(leagueCode);
-        String country = LEAGUE_COUNTRIES.get(leagueCode);
-
-        // Fetch all teams with squads in one request
-        String url = String.format("https://api.football-data.org/v4/competitions/%s/teams?season=2024", leagueCode);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("X-Auth-Token", footballDataApiKey)
-                .timeout(Duration.ofSeconds(30))
-                .GET()
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() != 200) {
-            log.warn("API returned {} for league {}: {}", response.statusCode(), leagueCode, response.body());
-            return 0;
+    /**
+     * Manual trigger — call via POST /api/admin/sync
+     * Syncs the next league in the list immediately.
+     */
+    public void triggerSync() {
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("API_FOOTBALL_KEY not configured — skipping manual sync");
+            return;
         }
 
-        JsonNode root = objectMapper.readTree(response.body());
-        JsonNode competitionNode = root.path("competition");
-        JsonNode teamsArray = root.path("teams");
+        int leagueId = ALL_LEAGUES.get(currentIndex);
+        currentIndex = (currentIndex + 1) % ALL_LEAGUES.size();
 
-        if (!teamsArray.isArray() || teamsArray.size() == 0) {
-            log.warn("No teams found for league {}", leagueCode);
-            return 0;
-        }
-
-        CompetitionSummaryResponse competition = new CompetitionSummaryResponse(
-                competitionId,
-                leagueName,
-                country,
-                competitionNode.path("emblem").asText(null)
-        );
-
-        int totalFetched = 0;
-
-        for (JsonNode teamNode : teamsArray) {
-            long teamId = teamNode.path("id").asLong();
-            String teamName = teamNode.path("name").asText(null);
-            String teamLogo = teamNode.path("crest").asText(null);
-
-            TeamSummaryResponse team = new TeamSummaryResponse(
-                    teamId, teamName, country, leagueName, teamLogo
-            );
-
-            // Try to get squad from team node first
-            JsonNode squadArray = teamNode.path("squad");
-            List<PlayerResponse> players = new ArrayList<>();
-
-            if (squadArray.isArray() && squadArray.size() > 0) {
-                for (JsonNode playerNode : squadArray) {
-                    PlayerResponse player = parsePlayer(playerNode, team, competition);
-                    if (player != null) players.add(player);
-                }
-            } else {
-                // Fetch squad separately with rate limit delay
-                Thread.sleep(6100); // 10 req/min = 1 per 6 seconds
-                players = fetchTeamSquad(teamId, team, competition);
-            }
-
-            if (!players.isEmpty()) {
-                int persisted = persistenceService.persistPlayers(players, "2024");
-                totalFetched += persisted;
-                log.info("{} - {}: {} players", leagueCode, teamName, persisted);
-            }
-        }
-
-        return totalFetched;
-    }
-
-    private List<PlayerResponse> fetchTeamSquad(long teamId,
-                                                  TeamSummaryResponse team,
-                                                  CompetitionSummaryResponse competition) throws Exception {
-        String url = String.format("https://api.football-data.org/v4/teams/%d", teamId);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("X-Auth-Token", footballDataApiKey)
-                .timeout(Duration.ofSeconds(30))
-                .GET()
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() != 200) {
-            log.warn("Team {} returned status {}", teamId, response.statusCode());
-            return new ArrayList<>();
-        }
-
-        JsonNode root = objectMapper.readTree(response.body());
-        JsonNode squadArray = root.path("squad");
-
-        List<PlayerResponse> players = new ArrayList<>();
-        if (squadArray.isArray()) {
-            for (JsonNode playerNode : squadArray) {
-                PlayerResponse player = parsePlayer(playerNode, team, competition);
-                if (player != null) players.add(player);
-            }
-        }
-
-        return players;
-    }
-
-    private PlayerResponse parsePlayer(JsonNode playerNode,
-                                        TeamSummaryResponse team,
-                                        CompetitionSummaryResponse competition) {
+        log.info("Manual sync triggered for league {} (season {})", leagueId, defaultSeason);
         try {
-            long playerId = playerNode.path("id").asLong();
-            if (playerId == 0) return null;
+            int total = syncLeague(leagueId, defaultSeason);
+            log.info("Manual sync complete: {} players for league {}", total, leagueId);
+        } catch (Exception e) {
+            log.error("Manual sync failed for league {}: {}", leagueId, e.getMessage(), e);
+        }
+    }
 
-            String name = playerNode.path("name").asText(null);
-            String position = mapPosition(playerNode.path("position").asText(null));
-            String nationality = playerNode.path("nationality").asText(null);
-            String dateOfBirth = playerNode.path("dateOfBirth").asText(null);
-            Integer age = calculateAge(dateOfBirth);
+    /**
+     * Syncs all players for a given league and season.
+     * Fetches page by page until all players are retrieved.
+     * Each page has 20 players. Adds 300ms delay between pages
+     * to respect API rate limits.
+     */
+    private int syncLeague(int leagueId, int season) throws Exception {
+        LinkedHashMap<Long, PlayerResponse> playerMap = new LinkedHashMap<>();
+        int page = 1;
+
+        while (true) {
+            JsonNode root = get("/players", Map.of(
+                    "league", String.valueOf(leagueId),
+                    "season", String.valueOf(season),
+                    "page", String.valueOf(page)
+            ));
+
+            JsonNode response = root.path("response");
+            JsonNode paging = root.path("paging");
+
+            if (!response.isArray() || response.size() == 0) {
+                log.info("League {} page {}: no more players", leagueId, page);
+                break;
+            }
+
+            int totalPages = paging.path("total").asInt(1);
+            log.info("League {} page {}/{}: {} players", leagueId, page, totalPages, response.size());
+
+            for (JsonNode item : response) {
+                PlayerResponse player = parsePlayer(item, leagueId);
+                if (player != null && player.getId() != null) {
+                    playerMap.merge(player.getId(), player, this::mergePlayer);
+                }
+            }
+
+            if (page >= totalPages) break;
+            page++;
+
+            // Respect rate limit: 30 requests/minute on free tier
+            Thread.sleep(300);
+        }
+
+        if (playerMap.isEmpty()) return 0;
+
+        List<PlayerResponse> players = new ArrayList<>(playerMap.values());
+        int persisted = persistenceService.persistPlayers(players, String.valueOf(season));
+        log.info("League {}: persisted {} players to DB", leagueId, persisted);
+        return persisted;
+    }
+
+    /**
+     * Parses a single player from the api-football response.
+     * Extracts: photo, stats, goals, assists, rating, cards, position, nationality, age.
+     * Market value is not available on free tier — set to 0.
+     */
+    private PlayerResponse parsePlayer(JsonNode item, int leagueId) {
+        try {
+            JsonNode playerNode = item.path("player");
+            JsonNode statsArray = item.path("statistics");
+            JsonNode statsNode = statsArray.isArray() && statsArray.size() > 0
+                    ? statsArray.get(0)
+                    : objectMapper.createObjectNode();
+
+            JsonNode teamNode = statsNode.path("team");
+            JsonNode leagueNode = statsNode.path("league");
+            JsonNode gamesNode = statsNode.path("games");
+            JsonNode goalsNode = statsNode.path("goals");
+            JsonNode cardsNode = statsNode.path("cards");
+            JsonNode passesNode = statsNode.path("passes");
+
+            Long playerId = longOrNull(playerNode, "id");
+            if (playerId == null) return null;
+
+            String name = text(playerNode, "name");
+            String photo = text(playerNode, "photo"); // ✅ real photo URL
+            String position = text(gamesNode, "position");
+            String nationality = text(playerNode, "nationality");
+            Integer age = intOrNull(playerNode, "age");
+
+            // Team info
+            TeamSummaryResponse team = null;
+            if (!teamNode.isMissingNode() && !teamNode.isEmpty()) {
+                team = new TeamSummaryResponse(
+                        longOrNull(teamNode, "id"),
+                        text(teamNode, "name"),
+                        null,
+                        text(leagueNode, "name"),
+                        text(teamNode, "logo") // ✅ real team logo
+                );
+            }
+
+            // Competition info
+            CompetitionSummaryResponse competition = null;
+            if (!leagueNode.isMissingNode() && !leagueNode.isEmpty()) {
+                competition = new CompetitionSummaryResponse(
+                        longOrNull(leagueNode, "id"),
+                        text(leagueNode, "name"),
+                        text(leagueNode, "country"),
+                        text(leagueNode, "logo") // ✅ real league logo
+                );
+            }
+
+            // Stats
+            int appearances = intOrZero(gamesNode, "appearences"); // api-football typo
+            int goals = intOrZero(goalsNode, "total");
+            int assists = intOrZero(goalsNode, "assists");
+            int minutes = intOrZero(gamesNode, "minutes");
+            int yellowCards = intOrZero(cardsNode, "yellow");
+            int redCards = intOrZero(cardsNode, "red");
+            BigDecimal rating = decimalOrZero(gamesNode, "rating");
+
+            String teamName = team != null ? team.getName() : null;
+            String description = buildDescription(name, position, teamName);
 
             PlayerResponse player = new PlayerResponse();
             player.setId(playerId);
             player.setName(name);
-            player.setFirstname(extractFirstName(name));
-            player.setLastname(extractLastName(name));
+            player.setFirstname(text(playerNode, "firstname"));
+            player.setLastname(text(playerNode, "lastname"));
             player.setAge(age);
             player.setNationality(nationality);
             player.setPosition(position);
-            player.setPhoto(null);
-            player.setImage(null);
+            player.setPhoto(photo);   // ✅ photo synced
+            player.setImage(photo);   // ✅ image synced
             player.setTeamSummary(team);
             player.setCompetition(competition);
-            player.setTeam(team != null ? team.getName() : null);
-            player.setClub(team != null ? team.getName() : null);
+            player.setTeam(teamName);
+            player.setClub(teamName);
             player.setLeague(competition != null ? competition.getName() : null);
-            player.setMarketValue(0L);
-            player.setAppearances(0);
-            player.setGoalsScored(0);
-            player.setAssists(0);
-            player.setMinutesPlayed(0);
-            player.setYellowCards(0);
-            player.setRedCards(0);
-            player.setRating(BigDecimal.ZERO);
+            player.setMarketValue(0L); // free tier doesn't have market values
+            player.setAppearances(appearances);
+            player.setGoalsScored(goals);
+            player.setAssists(assists);
+            player.setMinutesPlayed(minutes);
+            player.setYellowCards(yellowCards);
+            player.setRedCards(redCards);
+            player.setRating(rating);
             player.setSpecialAbility("");
-            player.setDescription(name + " is a " +
-                    (position != null ? position.toLowerCase() : "footballer") +
-                    (team != null ? " playing for " + team.getName() : "") + ".");
+            player.setDescription(description);
 
             return player;
         } catch (Exception e) {
@@ -279,37 +272,95 @@ public class PlayerSyncScheduler {
         }
     }
 
-    private String mapPosition(String position) {
-        if (position == null) return null;
-        return switch (position) {
-            case "Goalkeeper" -> "Goalkeeper";
-            case "Centre-Back", "Left-Back", "Right-Back" -> "Defender";
-            case "Defensive Midfield", "Central Midfield", "Attacking Midfield",
-                    "Left Midfield", "Right Midfield" -> "Midfielder";
-            case "Centre-Forward", "Left Winger", "Right Winger", "Secondary Striker" -> "Attacker";
-            default -> position;
-        };
-    }
-
-    private Integer calculateAge(String dateOfBirth) {
-        if (dateOfBirth == null || dateOfBirth.isBlank()) return null;
-        try {
-            LocalDate dob = LocalDate.parse(dateOfBirth.substring(0, 10));
-            return Period.between(dob, LocalDate.now()).getYears();
-        } catch (Exception e) {
-            return null;
+    /**
+     * When the same player appears in multiple pages/leagues,
+     * keep the entry with more complete stats.
+     */
+    private PlayerResponse mergePlayer(PlayerResponse existing, PlayerResponse incoming) {
+        // Prefer entry with a photo
+        if (existing.getPhoto() == null && incoming.getPhoto() != null) {
+            existing.setPhoto(incoming.getPhoto());
+            existing.setImage(incoming.getPhoto());
         }
+        // Prefer higher appearances
+        if (safeInt(incoming.getAppearances()) > safeInt(existing.getAppearances())) {
+            existing.setAppearances(incoming.getAppearances());
+            existing.setGoalsScored(incoming.getGoalsScored());
+            existing.setAssists(incoming.getAssists());
+            existing.setMinutesPlayed(incoming.getMinutesPlayed());
+            existing.setRating(incoming.getRating());
+        }
+        return existing;
     }
 
-    private String extractFirstName(String fullName) {
-        if (fullName == null) return null;
-        String[] parts = fullName.split(" ");
-        return parts[0];
+    private JsonNode get(String path, Map<String, String> params) throws IOException {
+        String query = params.entrySet().stream()
+                .map(e -> encode(e.getKey()) + "=" + encode(e.getValue()))
+                .reduce((a, b) -> a + "&" + b)
+                .orElse("");
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + path + (query.isEmpty() ? "" : "?" + query)))
+                .header("x-apisports-key", apiKey)
+                .timeout(Duration.ofSeconds(60))
+                .GET()
+                .build();
+
+        HttpResponse<String> response;
+        try {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("HTTP request interrupted", e);
+        }
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("API returned status " + response.statusCode() + ": " + response.body());
+        }
+
+        JsonNode root = objectMapper.readTree(response.body());
+        JsonNode errors = root.path("errors");
+        if (!errors.isMissingNode() && !errors.isNull() && errors.size() > 0) {
+            throw new IOException("API errors: " + errors);
+        }
+
+        return root;
     }
 
-    private String extractLastName(String fullName) {
-        if (fullName == null) return null;
-        String[] parts = fullName.split(" ");
-        return parts.length > 1 ? parts[parts.length - 1] : null;
+    private String buildDescription(String name, String position, String team) {
+        String safeName = name != null ? name : "This player";
+        String safePos = position != null ? position.toLowerCase() : "footballer";
+        String safeTeam = team != null ? team : "club football";
+        return safeName + " is a " + safePos + " currently playing for " + safeTeam + ".";
     }
+
+    private String text(JsonNode node, String field) {
+        JsonNode child = node.path(field);
+        return child.isMissingNode() || child.isNull() ? null : child.asText();
+    }
+
+    private Long longOrNull(JsonNode node, String field) {
+        JsonNode child = node.path(field);
+        return child.isMissingNode() || child.isNull() ? null : child.asLong();
+    }
+
+    private Integer intOrNull(JsonNode node, String field) {
+        JsonNode child = node.path(field);
+        return child.isMissingNode() || child.isNull() ? null : child.asInt();
+    }
+
+    private int intOrZero(JsonNode node, String field) {
+        Integer v = intOrNull(node, field);
+        return v != null ? v : 0;
+    }
+
+    private BigDecimal decimalOrZero(JsonNode node, String field) {
+        String v = text(node, field);
+        if (v == null || v.isBlank() || "null".equalsIgnoreCase(v)) return BigDecimal.ZERO;
+        try { return new BigDecimal(v); } catch (NumberFormatException e) { return BigDecimal.ZERO; }
+    }
+
+    private int safeInt(Integer v) { return v != null ? v : 0; }
+
+    private String encode(String v) { return URLEncoder.encode(v, StandardCharsets.UTF_8); }
 }
