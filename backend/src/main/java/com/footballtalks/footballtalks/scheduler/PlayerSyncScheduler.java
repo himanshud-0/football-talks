@@ -160,7 +160,7 @@ public class PlayerSyncScheduler {
                 }
             }
 
-            if (page >= totalPages) break;
+            if (page >= totalPages || page >= 3) break;
             page++;
 
             // Respect rate limit: 30 requests/minute on free tier
